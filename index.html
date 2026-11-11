@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Level Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.4.0/p5.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/1.0.5/pako_inflate.min.js"></script>
+    <script src="https://naturalintelligence.github.io/fast-xml-parser/lib/fxparser.min.js"></script>
+
+    <script src="src/Camera.js"></script>
+    <script src="src/Screens.js"></script>
+    <script src="src/Entities.js"></script>
+    <script src="src/Viewer.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+
+        #controls {
+            position: fixed;
+            z-index: 2;
+            top: 0;
+            left: 0;
+        }
+
+        #canvasContainer {
+            position: relative;
+            z-index: 1;
+        }
+
+        #jsonFile,
+        #xmlFile {
+            display: none;
+        }
+
+        .custom-file-upload {
+            padding: 6px;
+            background-color: #ddd;
+            cursor: pointer;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <input type="file" id="jsonFile" accept=".ZSN,.json,.json.z" onchange="loadFile_JSON(event)" />
+        <label for="jsonFile" class="custom-file-upload">Load JSON</label>
+        <input type="file" id="xmlFile" accept=".xml,.xml.z" onchange="loadFile_XML(event)" />
+        <label for="xmlFile" class="custom-file-upload">Load XML</label>
+        <div id="levelData"></div>
+    </div>
+    <div id="canvasContainer"></div>
+
+    <script>
+	
+    function reset() {
+        // Clear levelData
+        levelData = null;
+
+        // Clear entities
+        entities = [];
+
+        // Reset Camera
+        panX = 0;
+        panY = 0;
+        zoom = 1;
+
+        // Other resets as needed...
+    }
+
+    function loadFile_JSON(event) {
+        reset();  // Reset before loading a new file
+
+        let file = event.target.files[0];
+
+        if (file) {
+            let reader = new FileReader();
+            reader.onload = function(e) {
+                let content = new Uint8Array(e.target.result);
+                let stringContent = new TextDecoder().decode(content);
+                try {
+                    // Try to parse the file content as JSON
+                    let levelData = JSON.parse(stringContent);
+                    displayLevelData(levelData);
+                } catch (error) {
+                    // If it fails, assume it's zlib compressed JSON
+                    try {
+                        let decompressedContent = pako.inflate(content, { to: 'string' });
+                        let levelData = JSON.parse(decompressedContent);
+                        displayLevelData(levelData);
+                    } catch (decompressionError) {
+                        console.error("File is neither valid JSON nor valid zlib compressed JSON.", decompressionError);
+                    }
+                }
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+    }
+    function fixxml(xml) {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\n<root>\n" + xml + "\n</root>" ;
+    }
+    
+    function normalizeXMLData(parsedXML) {
+    let normalized = {};
+
+    // Function to check if a string is a number
+    function isNumeric(value) {
+        return /^\d+(\.\d+)?$/.test(value);
+    }
+
+    for (let section of Object.keys(parsedXML.root)) {
+        for (let item of parsedXML.root[section]) {
+            if (item['@_key']) {
+                if (item.tableElement) {
+                    normalized[item['@_key']] = [];
+                    for (let subItem of item.tableElement) {
+                        let subObject = {};
+                        for (let element of subItem.element) {
+                            let value = element['@_value'];
+                            // If value is a number, convert it
+                            if (isNumeric(value)) {
+                                value = value.includes('.') ? parseFloat(value) : parseInt(value);
+                            }
+                            subObject[element['@_key']] = value;
+                        }
+                        normalized[item['@_key']].push(subObject);
+                    }
+                } else {
+                    let value = item['@_value'];
+                    // If value is a number, convert it
+                    if (isNumeric(value)) {
+                        value = value.includes('.') ? parseFloat(value) : parseInt(value);
+                    }
+                    normalized[item['@_key']] = value;
+                }
+            }
+        }
+    }
+
+    return normalized;
+}
+
+
+
+
+    function loadFile_XML(event) {
+        reset();  // Reset before loading a new file
+
+        let file = event.target.files[0];
+
+        if (file) {
+            let reader = new FileReader();
+            
+            
+			const options = {
+				ignoreAttributes: false,
+				numberParseOptions: {
+					leadingZeros: true,
+					hex: true,
+				}
+			};
+            
+            const XML = new XMLParser( options );
+            
+            reader.onload = function(e) {
+                let content = new Uint8Array(e.target.result);
+                let stringContent = new TextDecoder().decode(content);
+                try {
+                    // Try to parse the file content as XML
+                    let levelData = XML.parse(fixxml(stringContent));
+                    levelData = normalizeXMLData(levelData);
+                    displayLevelData(levelData);
+                } catch (error) {
+                    // If it fails, assume it's zlib compressed XML
+                    try {
+                        let decompressedContent = pako.inflate(content, { to: 'string' });
+                        let levelData = XML.parse(fixxml(decompressedContent));
+                        
+                        levelData = normalizeXMLData(levelData);
+                        
+                        //console.log(JSON.stringify(levelData, null, 2)); // 2 is for pretty-printing with indentation
+                        
+                        displayLevelData(levelData);
+                    } catch (decompressionError) {
+                        console.error("File is neither valid XML nor valid zlib compressed XML.", decompressionError);
+                    }
+                }
+            };
+
+            reader.readAsArrayBuffer(file);
+        }
+    }
+    </script>
+</body>
+</html>
